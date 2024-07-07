@@ -26,18 +26,18 @@ RCGateComplementaryMapping = {
     "XI": ["XX", 0, 0],# the first element is the complementary gate, the second and third elements are sign of two gates, 0 --> +, 1 --> -
     "IX": ["IX", 0, 0],
     "XX": ["XI", 0, 0],
-    "YX": ["YY", 0, 0],
-    "ZX": ["ZY", 0, 0],
+    "YX": ["YI", 0, 0],
+    "ZX": ["ZX", 0, 0],
     "YI": ["YX", 0, 0],
     "IY": ["ZY", 0, 0],
-    "XY": ["XZ", 0, 0],
-    "YY": ["YX", 0, 1],
-    "ZY": ["ZZ", 0, 0],
+    "XY": ["YZ", 0, 0],
+    "YY": ["XZ", 0, 1],
+    "ZY": ["IY", 0, 0],
     "ZI": ["ZI", 0, 0],
-    "IZ": ["IZ", 0, 0],
-    "XZ": ["XY", 0, 0],
-    "YZ": ["YY", 0, 1],
-    "ZZ": ["ZI", 0, 0],
+    "IZ": ["ZZ", 0, 0],
+    "XZ": ["YY", 0, 1],
+    "YZ": ["XY", 0, 0],
+    "ZZ": ["IZ", 0, 0],
     "II": ["II", 0, 0]
 }
 
@@ -56,11 +56,16 @@ class RandomCompile:
                     n_qubit = len(qc.gate_list)
                     # total_cycle_added = 0
                     # sec_idx = 0
-                    for qubit_idx in range(n_qubit):
-                        total_cycle_origin = len(qc.gate_list[qubit_idx])
-                        total_cycle_added = 0
+                    total_cycle_origin = len(qc.gate_list[0])
+                    total_cycle_added = 0
+                    # for qubit_idx in range(n_qubit):
+                    for cycle_origin in range(total_cycle_origin):
+                        # total_cycle_origin = len(qc.gate_list[qubit_idx])
+                        # total_cycle_added = 0
                         # for cycle in range(len(qc.gate_list[qubit_idx])):
-                        for cycle_origin in range(total_cycle_origin):
+                        # for cycle_origin in range(total_cycle_origin):
+                        CYCLE_ADD = False
+                        for qubit_idx in range(n_qubit):
                             cycle = cycle_origin + total_cycle_added
                             # if cycle > qc.sec_list[sec_idx][1]:
                             #     qc.sec_list[sec_idx][1] += total_cycle_added
@@ -85,7 +90,8 @@ class RandomCompile:
                                 qc.gate_list[control_qubit_idx].insert(cycle, [control_RC, 0])
                                 qc.gate_list[control_qubit_idx].insert(cycle+2, [control_RC_comp, control_RC_comp_sign])
                                 # sec_idx += 2
-                                total_cycle_added += 2
+                                # total_cycle_added += 2
+                                CYCLE_ADD = True
                                 continue
                             if qc.gate_list[qubit_idx][cycle][0] == "BARRIER":
                                 RC_rng = random.randint(0, len(RCGateTable) - 1)
@@ -93,8 +99,11 @@ class RandomCompile:
                                 qc.gate_list[qubit_idx].insert(cycle, [RC_gate, 0])
                                 qc.gate_list[qubit_idx].insert(cycle+2, [RC_gate, 0])
                                 # sec_idx += 2
-                                total_cycle_added += 2
+                                # total_cycle_added += 2
+                                CYCLE_ADD = True
                                 continue
+                        if CYCLE_ADD:
+                            total_cycle_added += 2
                     # update the sec_list
                     start_add = 0
                     end_add = 2

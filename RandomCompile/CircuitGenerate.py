@@ -10,7 +10,8 @@ import random
 import math
 import cmath
 import json
-import RandomCompiling
+import RandomCompile.RandomCompiling as RandomCompiling
+# import RandomCompiling
 
 class QuantumCircuit:
     def __init__(self, qubits_num, circuit_name="test"):
@@ -144,8 +145,8 @@ class QuantumCircuit:
     
     # The function to apply the quantum circuit to the simulator
     def apply_circuit(self, simulator='mqvector'):
-        for qubit_idx in range(self.qubits_num):
-            for cycle in range(len(self.gate_list[qubit_idx])):
+        for cycle in range(len(self.gate_list[0])):
+            for qubit_idx in range(self.qubits_num):
                 gate_info = self.gate_list[qubit_idx][cycle]
                 if gate_info[0] == "U3":
                     self.circuit += U3(gate_info[1][0], gate_info[1][1], gate_info[1][2]).on(qubit_idx)
@@ -362,6 +363,12 @@ class QuantumCircuitRC:
             
     ####################### The following functions are for visualization ############################
     
+    # The function to visualize the ideal quantum circuit
+    def visualize_ideal_circuit(self):
+        if self.ideal_circuit is None:
+            raise ValueError("Ideal circuit is not generated yet")
+        self.ideal_circuit.test_draw_circuit_from_list()
+    
     # The function to visualize the RC quantum circuit based on the trial number
     def visualize_RC_circuit_trial(self, trial_idx):
         if trial_idx >= len(self.trials_qc_gate_list):
@@ -416,18 +423,62 @@ class QuantumCircuitRC:
 
 
 ##### test single unit #####
-qc_RC = QuantumCircuitRC(2, "test_single_unit")
-qc_RC.generate_ideal_circuit_random(1, 1, single_multi_qubit_gate=False)
-qc_RC.generate_trials_circuit(1)
-qc_RC.visualize_all_RC_circuit_trials()
-qc_RC.apply_circuit_all_trials()
-# print(qc_RC.trials_circuit_sim_result[0].get_qs(True))
-# print(qc_RC.ideal_circuit_sim_result)
-sv = qc_RC.ideal_circuit_sim_result.get_pure_state_vector()
+# qc_RC = QuantumCircuitRC(3, "test_single_unit")
+# qc_RC.generate_ideal_circuit_random(3, 1, single_multi_qubit_gate=False)
+# qc_RC.generate_trials_circuit(1)
+# qc_RC.visualize_ideal_circuit()
+# qc_RC.visualize_all_RC_circuit_trials()
+# qc_RC.apply_circuit_all_trials()
+# # print(qc_RC.trials_circuit_sim_result[0].get_qs(True))
+# # print(qc_RC.ideal_circuit_sim_result)
+# sv = qc_RC.ideal_circuit_sim_result.get_pure_state_vector()
+# print(sv)
+# print(qc_RC.trials_circuit_sim_result[0].get_pure_state_vector())
+# # qc_RC.visualize_all_RC_sim_results()
 
 
-# qc_RC.visualize_all_RC_sim_results()
+
+
+# def test_RC_gate_functionality_hypothesis(n_qubit, n_trials, n_max_cycle):
+#     qc_RC = QuantumCircuitRC(n_qubit)
+#     qc_RC.generate_ideal_circuit_random(n_max_cycle, 1, single_multi_qubit_gate=False)
+#     qc_RC.generate_trials_circuit(n_trials)
+#     qc_RC.apply_circuit_all_trials()
+#     ideal_sv = qc_RC.ideal_circuit_sim_result.get_pure_state_vector()
+#     print(ideal_sv)
+    
+#     print(qc_RC.trials_circuit_sim_result[0].get_pure_state_vector())
+#     # trial_sv = []
+#     # for i in range(len(qc_RC.trials_circuit_sim_result)):
+#     #     trial_sv.append(qc_RC.trials_circuit_sim_result[i].get_pure_state_vector())
+#     # print(ideal_sv)
+#     # print(trial_sv)
+#     # for i in range(len(trial_sv)):
+#     #     for j in range(len(ideal_sv)):
+#     #         # Check the real part of the amplitude
+#     #         assert ideal_sv[j].real == trial_sv[i][j].real
+#     #         # Check the imaginary part of the amplitude
+#     #         assert ideal_sv[j].imag == trial_sv[i][j].imag
+
+
+# test_RC_gate_functionality_hypothesis(2, 1, 1)
 
 
 
 
+    # "XI": ["XX", 0, 0], ok
+    # "IX": ["IX", 0, 0], ok
+    # "XX": ["XI", 0, 0], ok 
+    # "YX": ["YI", 0, 0], ok
+    # "ZX": ["ZX", 0, 0], ok
+    # "YI": ["YX", 0, 0], ok
+    # "IY": ["ZY", 0, 0], ok
+    # "XY": ["YZ", 0, 0], ok
+    # "YY": ["XZ", 0, 1], ok
+    # "ZY": ["IY", 0, 0], ok
+    # "ZI": ["ZI", 0, 0], ok
+    # "IZ": ["ZZ", 0, 0], ok
+    # "XZ": ["YY", 0, 1], ok
+    # "YZ": ["XY", 0, 0], ok
+    # "ZZ": ["IZ", 0, 0], ok
+    # "II": ["II", 0, 0]  ok

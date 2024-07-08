@@ -21,6 +21,20 @@ RCGateTable = {
     3: 'I'
 }
 
+RCGateSet = {
+    'X',
+    'Y',
+    'Z',
+    'I'
+}
+
+RC_matrix_table = {
+    "X": np.array([[0, 1], [1, 0]]),
+    "Y": np.array([[0, -1j], [1j, 0]]),
+    "Z": np.array([[1, 0], [0, -1]]),
+    "I": np.array([[1, 0], [0, 1]])
+}
+
 # Define the mapping table for RC gate and its complementary
 RCGateComplementaryMapping = {
     "XI": ["XX", 0, 0],# the first element is the complementary gate, the second and third elements are sign of two gates, 0 --> +, 1 --> -
@@ -44,7 +58,23 @@ RCGateComplementaryMapping = {
 class RandomCompile:
     def __init__(self):
         self.test_trials = [] # list of test circuits 
-        
+    
+    # The function to get the matrix representation of the U3 gate
+    @staticmethod
+    def get_U3_matrix(theta, phi, lambda_):
+        return np.array([[math.cos(theta/2), -cmath.exp(1j*lambda_)*math.sin(theta/2)], \
+            [cmath.exp(1j*phi)*math.sin(theta/2), cmath.exp(1j*(phi+lambda_))*math.cos(theta/2)]])
+    
+    # The function to get the U3 gate from the matrix representation
+    @staticmethod
+    def get_U3_gate(matrix):
+        # Ensure U is a unitary matrix
+        assert np.allclose(matrix @ matrix.conj().T, np.eye(2)), "The gate is not unitary"
+        theta = 2*math.acos(np.abs(matrix[0][0]))
+        phi = cmath.phase(matrix[1][0]) - cmath.phase(matrix[0][0])
+        lambda_ = cmath.phase(matrix[1][1]) - cmath.phase(matrix[1][0])
+        return [theta, phi, lambda_]
+    
     # The RC gate only applies for multi-qubit gates
     @staticmethod
     def applyRC(RC_apply=True):
@@ -120,6 +150,64 @@ class RandomCompile:
             return wrapper
         return decorator
     
+    # The function to combine the RC gates with previous and next single qubit gates
+    @staticmethod
+    def applyRC_combine(qc_comb, qc):
+        # update the gate_list
+        for qubit_idx in range(qc.qubits_num):
+            cycle = 0
+            while cycle < len(qc.gate_list[qubit_idx]):
+                # check if the current gate is a forward RC gate
+                if (qc.gate_list[qubit_idx][cycle][0] in RCGateSet) and (qc.gate_list[qubit_idx][cycle+1][0] in MultiQubitGateTable):
+                    gate_info_last = qc_comb.gate_list[qubit_idx].pop()
+                    gate_info_new = []
+                    U_pre_Matrix = RandomCompile.get_U3_matrix(gate_info_last[1][0], gate_info_last[1][1], gate_info_last[1][2])
+                    RC_Matrix = RC_matrix_table[qc.gate_list[qubit_idx][cycle][0]]
+                    U_Matrix = RC_Matrix @ U_pre_Matrix
+                    U_param = RandomCompile.get_U3_gate(U_Matrix)
+                    gate_info_new.append("U3")
+                    gate_info_new.append(U_param)
+                    qc_comb.gate_list[qubit_idx].append(gate_info_new)
+                    cycle += 1
+                # check if the current gate is a backward RC gate
+                elif (qc.gate_list[qubit_idx][cycle][0] in RCGateSet) and (qc.gate_list[qubit_idx][cycle-1][0] in MultiQubitGateTable):
+                    RC_gate_info = qc.gate_list[qubit_idx][cycle]
+                    U_next_gate_info = qc.gate_list[qubit_idx][cycle+1]
+                    RC_matrix = RC_matrix_table[RC_gate_info[0]]
+                    U_next_matrix = RandomCompile.get_U3_matrix(U_next_gate_info[1][0], U_next_gate_info[1][1], U_next_gate_info[1][2])
+                    U_Matrix = U_next_matrix @ RC_matrix
+                    U_param = RandomCompile.get_U3_gate(U_Matrix)
+                    gate_info_new = ["U3", U_param]
+                    qc_comb.gate_list[qubit_idx].append(gate_info_new)
+                    cycle += 2
+                # check if the RC gate is applied for barrier
+                elif (qc.gate_list[qubit_idx][cycle][0] in RCGateSet) and (qc.gate_list[qubit_idx][cycle+1][0] == "BARRIER"):
+                    cycle += 3
+                # check if the current gate is a multiple qubit gate or normal U3 gate
+                else:
+                    gate_info_new = []
+                    for i in range(len(qc.gate_list[qubit_idx][cycle])):
+                        if qc.gate_list[qubit_idx][cycle][i] is list:
+                            elem_info = []
+                            for j in range(len(qc.gate_list[qubit_idx][cycle][i])):
+                                elem_info.append(qc.gate_list[qubit_idx][cycle][i][j])
+                            gate_info_new.append(elem_info)
+                        else:
+                            gate_info_new.append(qc.gate_list[qubit_idx][cycle][i])
+                    qc_comb.gate_list[qubit_idx].append(gate_info_new)
+                    cycle += 1
+        # update the sec_list
+        sec_list_comb = []
+        cycle_sub = 0
+        for i in range(len(qc.sec_list)):
+            sec = []
+            sec.append(qc.sec_list[i][0]-cycle_sub)
+            cycle_sub += 2
+            sec.append(qc.sec_list[i][1]-cycle_sub)
+            sec_list_comb.append(sec)
+        qc_comb.sec_list = sec_list_comb
+        return qc_comb
+    
     
     # @staticmethod
     # def applyRC(func, RC_apply=True):
@@ -179,5 +267,9 @@ class RandomCompile:
     #                         continue
     #         return qc
     #     return wrapper
-                    
-                    
+
+# print(U3(0.5, 0.5, 0.2).matrix()[0][0].real)
+
+# matrix = U3(0, 0, 1).matrix()
+# print(matrix)
+# print(RandomCompile.get_U3_gate(matrix))

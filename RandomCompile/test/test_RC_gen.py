@@ -9,7 +9,15 @@ import pytest
 import math
 import cmath
 from hypothesis import given, strategies, assume, example, settings
+from mindquantum.simulator import Simulator
+from mindquantum.core.circuit import Circuit
+from mindquantum.core.gates import Measure
+from mindquantum.core.gates import H, X, Y, Z, CNOT, SWAP, RX, RY, RZ, U3
+from mindquantum.core.circuit import GateSelector, SequentialAdder, MixerAdder, NoiseChannelAdder
+
 from RandomCompile.CircuitGenerate import QuantumCircuitRC
+from RandomCompile.RandomCompiling import RandomCompile
+
 
 # The hypothesis test to check whether the quantum circuit logic is the same for ideal one and RC one
 
@@ -34,5 +42,23 @@ def test_RC_gate_functionality_hypothesis(n_qubit, n_trials, n_max_cycle):
             # Check the imaginary part of the amplitude
             assert round(ideal_sv[j].imag, 12) == round(trial_sv[i][j].imag, 12)
 
+# The hypothesis test of matrix represnetation of U3 gate 
+@given(strategies.floats(min_value=-math.pi, max_value=math.pi), strategies.floats(min_value=-math.pi, max_value=math.pi), strategies.floats(min_value=-math.pi, max_value=math.pi))
+def test_get_U3_matrix_hypothesis(theta, phi, lambda_):
+    mind_matrix = U3(theta, phi, lambda_).matrix()
+    self_matrix = RandomCompile.get_U3_matrix(theta, phi, lambda_)
+    for i in range(len(mind_matrix)):
+        for j in range(len(mind_matrix[0])):
+            assert round(mind_matrix[i][j].real, 12) == round(self_matrix[i][j].real, 12)
+            assert round(mind_matrix[i][j].imag, 12) == round(self_matrix[i][j].imag, 12)
 
-# test_RC_gate_functionality_hypothesis(2, 1, 1)
+# The hypothesis test of parameter conversion of U3 gate
+@given(strategies.floats(min_value=-math.pi, max_value=math.pi), strategies.floats(min_value=-math.pi, max_value=math.pi), strategies.floats(min_value=-math.pi, max_value=math.pi))
+def test_get_U3_gate_hypothesis(theta, phi, lambda_):
+    gate_matrix = U3(theta, phi, lambda_).matrix()
+    param_gen = RandomCompile.get_U3_gate(gate_matrix)
+    gate_matrix_check = U3(param_gen[0], param_gen[1], param_gen[2]).matrix()
+    for i in range(len(gate_matrix)):
+        for j in range(len(gate_matrix[0])):
+            assert round(gate_matrix[i][j].real, 12) == round(gate_matrix_check[i][j].real, 12)
+            assert round(gate_matrix[i][j].imag, 12) == round(gate_matrix_check[i][j].imag, 12)

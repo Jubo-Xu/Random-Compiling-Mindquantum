@@ -62,3 +62,23 @@ def test_get_U3_gate_hypothesis(theta, phi, lambda_):
         for j in range(len(gate_matrix[0])):
             assert round(gate_matrix[i][j].real, 12) == round(gate_matrix_check[i][j].real, 12)
             assert round(gate_matrix[i][j].imag, 12) == round(gate_matrix_check[i][j].imag, 12)
+
+# The hypothesis test of combined RC circuits
+@given(strategies.integers(min_value=2, max_value=5), strategies.integers(min_value=1, max_value=10), strategies.integers(min_value=1, max_value=10))
+def test_RC_gate_combination_functionality_hypothesis(n_qubit, n_trials, n_max_cycle):
+    qc_RC = QuantumCircuitRC(n_qubit)
+    qc_RC.generate_ideal_circuit_random(n_max_cycle, 1, single_multi_qubit_gate=False)
+    qc_RC.generate_trials_circuit(n_trials)
+    # qc_RC.apply_circuit_all_trials()
+    qc_RC.generate_circuit_combination_all_trials()
+    qc_RC.apply_circuit_combination_all_trials()
+    ideal_sv = qc_RC.ideal_circuit_sim_result.get_pure_state_vector()
+    trial_sv = []
+    for i in range(len(qc_RC.trials_combined_circuit_sim_result)):
+        trial_sv.append(qc_RC.trials_combined_circuit_sim_result[i].get_pure_state_vector())
+    for i in range(len(trial_sv)):
+        for j in range(len(ideal_sv)):
+            # Check the real part of the amplitude
+            assert round(ideal_sv[j].real, 12) == round(trial_sv[i][j].real, 12)
+            # Check the imaginary part of the amplitude
+            assert round(ideal_sv[j].imag, 12) == round(trial_sv[i][j].imag, 12)

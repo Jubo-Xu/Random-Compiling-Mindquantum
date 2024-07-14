@@ -4,23 +4,26 @@ from mindquantum.core.circuit import Circuit
 from mindquantum.core.gates import Measure
 from mindquantum.core.gates import H, X, Y, Z, CNOT, SWAP, RX, RY, RZ, U3, GlobalPhase, I
 from mindquantum.core.circuit import GateSelector, SequentialAdder, MixerAdder, NoiseChannelAdder
+from mindquantum.core.gates import DepolarizingChannel, AmplitudeDampingChannel, PhaseDampingChannel
 from mindquantum.core.operators import Hamiltonian
 from mindquantum.core.operators import QubitOperator
 import random
 import math
 import cmath
 import json
-import RandomCompile.RandomCompiling as RandomCompiling
-# import RandomCompiling
+# import RandomCompile.RandomCompiling as RandomCompiling
+import RandomCompiling
 
 class QuantumCircuit:
-    def __init__(self, qubits_num, circuit_name="test"):
+    def __init__(self, qubits_num, circuit_name="test", NOISE=False):
         self.name = circuit_name
         self.qubits_num = qubits_num
         self.qubits_idx_list = [i for i in range(qubits_num)] # a list containing the qubit index
         self.gate_list = [[] for i in range(qubits_num)] # a two dimensional list containing the gates applied to each qubit, the first dimension is the qubit index, the second dimension is the quantum cycle
         self.sec_list = [] # a list containing the start and end indices of each section in a 2 element list, len(sec_list) = number of sections
         self.circuit = Circuit()
+        self.NOISE = NOISE # The noise flag
+        self.NOISE_LIST = [[] for i in range(qubits_num)] # The list contains whether a noise channel should be added after each gate 
     
     def to_json(self):
         with open(self.name+'.json', 'w') as json_file:
@@ -143,50 +146,89 @@ class QuantumCircuit:
         sec_end_idx += 1
         self.sec_list.append([sec_start_idx, sec_end_idx])
     
+    # Generate a single unit, which contains only one CNOT gate
+    @staticmethod
+    def generate_single_unit(circuit_name="test_single_unit"):
+        qc = QuantumCircuit(2, circuit_name)
+        # randomly generate the control and target qubit pair
+        ct_pair = select_target_control_pair_rand(qc.qubits_idx_list)
+        control_idx = ct_pair[0][1]
+        target_idx = ct_pair[0][0]
+        qc.add_gate(target_idx, ["CNOT", [0, control_idx]])
+        qc.add_gate(control_idx, ["CNOT", [1, target_idx]])
+        qc.sec_list.append([0, 0])
+        return qc
+    
+    def AddNoise(func):
+        def wrapper(self, *args, **kwargs):
+            # Call the actual function
+            func(self, *args, **kwargs)
+            # Add noise to the circuit if needed
+            if self.NOISE:
+                cycle = args[0]
+                # loop through each qubit
+                for qubit_idx in range(self.qubits_num):
+                    # check whether a noise channel should be added after each gate
+                    if self.NOISE_LIST[qubit_idx][cycle]:
+                        # add the depolarizing noise
+                        self.circuit += DepolarizingChannel(0.1).on(qubit_idx)
+                        # add the amplitude damping noise
+                        self.circuit += AmplitudeDampingChannel(0.1).on(qubit_idx)
+                        # add the phase damping noise
+                        self.circuit += PhaseDampingChannel(0.1).on(qubit_idx)
+            return 
+        return wrapper
+    
+    # The function to apply the quantum gate 
+    @AddNoise
+    def apply_gate_each_cycle(self, cycle):
+        for qubit_idx in range(self.qubits_num):
+            gate_info = self.gate_list[qubit_idx][cycle]
+            if gate_info[0] == "U3":
+                self.circuit += U3(gate_info[1][0], gate_info[1][1], gate_info[1][2]).on(qubit_idx)
+            elif gate_info[0] == "CNOT":
+                if gate_info[1][0] == 0:
+                    self.circuit += X.on(qubit_idx, gate_info[1][1])
+                else:
+                    continue
+            elif gate_info[0] == "X":
+                if gate_info[1] == 0:
+                    self.circuit += X.on(qubit_idx)
+                else:
+                    self.circuit += X.on(qubit_idx)
+                    self.circuit += GlobalPhase(math.pi).on(qubit_idx)
+            elif gate_info[0] == "Y":
+                if gate_info[1] == 0:
+                    self.circuit += Y.on(qubit_idx)
+                else:
+                    self.circuit += Y.on(qubit_idx)
+                    self.circuit += GlobalPhase(math.pi).on(qubit_idx)
+            elif gate_info[0] == "Z":
+                if gate_info[1] == 0:
+                    self.circuit += Z.on(qubit_idx)
+                else:
+                    self.circuit += Z.on(qubit_idx)
+                    self.circuit += GlobalPhase(math.pi).on(qubit_idx)
+            elif gate_info[0] == "I":
+                if gate_info[1] == 0:
+                    self.circuit += I.on(qubit_idx)
+                else:
+                    self.circuit += I.on(qubit_idx)
+                    self.circuit += GlobalPhase(math.pi).on(qubit_idx)
+            else:
+                continue
+    
+    
     # The function to apply the quantum circuit to the simulator
     def apply_circuit(self, simulator='mqvector'):
         for cycle in range(len(self.gate_list[0])):
-            for qubit_idx in range(self.qubits_num):
-                gate_info = self.gate_list[qubit_idx][cycle]
-                if gate_info[0] == "U3":
-                    self.circuit += U3(gate_info[1][0], gate_info[1][1], gate_info[1][2]).on(qubit_idx)
-                elif gate_info[0] == "CNOT":
-                    if gate_info[1][0] == 0:
-                        self.circuit += X.on(qubit_idx, gate_info[1][1])
-                    else:
-                        continue
-                elif gate_info[0] == "X":
-                    if gate_info[1] == 0:
-                        self.circuit += X.on(qubit_idx)
-                    else:
-                        self.circuit += X.on(qubit_idx)
-                        self.circuit += GlobalPhase(math.pi).on(qubit_idx)
-                elif gate_info[0] == "Y":
-                    if gate_info[1] == 0:
-                        self.circuit += Y.on(qubit_idx)
-                    else:
-                        self.circuit += Y.on(qubit_idx)
-                        self.circuit += GlobalPhase(math.pi).on(qubit_idx)
-                elif gate_info[0] == "Z":
-                    if gate_info[1] == 0:
-                        self.circuit += Z.on(qubit_idx)
-                    else:
-                        self.circuit += Z.on(qubit_idx)
-                        self.circuit += GlobalPhase(math.pi).on(qubit_idx)
-                elif gate_info[0] == "I":
-                    if gate_info[1] == 0:
-                        self.circuit += I.on(qubit_idx)
-                    else:
-                        self.circuit += I.on(qubit_idx)
-                        self.circuit += GlobalPhase(math.pi).on(qubit_idx)
-                else:
-                    continue
+            self.apply_gate_each_cycle(cycle)
         sim = Simulator(simulator, self.qubits_num)
         sim.apply_circuit(self.circuit)
         return sim
     
     # Test draw of the quantum circuit
-    def test_draw_circuit_from_list(self, qubit_space=15, idx_space=5, sec_space=10):
+    def test_draw_circuit_from_list(self, qubit_space=20, idx_space=5, sec_space=10):
         testdraw = ""
         # show the name of the quantum circuit
         testdraw += "Quantum Circuit: "+self.name+"\n"
@@ -300,13 +342,16 @@ def select_target_control_pair_rand(qubit_num_list):
 
 ############################### quantum circuit under RC ##################################
 class QuantumCircuitRC:
-    def __init__ (self, qubits_num, circuit_name="test"):
+    def __init__ (self, qubits_num, circuit_name="test", single_unit=False):
+        self.SINGLE_UNIT = single_unit
         self.name = circuit_name
         self.qubits_num = qubits_num
         self.ideal_circuit = None
         self.ideal_circuit_sim_result = None # the simulator result for the ideal quantum circuit
         self.trials_qc_gate_list = [] # the list of gate_list based quantum circuits for trials
         self.trials_circuit_sim_result = [] # the list of simulator results for quantum circuits of all trials
+        self.trials_combined_circuits = [] # the list of combined quantum circuits for all trials
+        self.trials_combined_circuit_sim_result = [] # the list of simulator results for combined quantum circuits for all trials
     
     @staticmethod
     def from_json(json_file):
@@ -316,12 +361,15 @@ class QuantumCircuitRC:
         qc_RC.ideal_circuit_sim_result = qc_RC.ideal_circuit.apply_circuit()
         return qc_RC
     
-    def generate_ideal_circuit_random(self, max_cycle, max_single_num_per_cycle, single_multi_qubit_gate=True):
+    def generate_ideal_circuit_random(self, max_cycle=1, max_single_num_per_cycle=1, single_multi_qubit_gate=True):
         self.ideal_circuit = QuantumCircuit(self.qubits_num, self.name)
-        self.ideal_circuit.generate_gate_random(max_cycle, max_single_num_per_cycle, single_multi_qubit_gate)
+        if self.SINGLE_UNIT:
+            self.ideal_circuit = QuantumCircuit.generate_single_unit(self.name)
+        else:
+            self.ideal_circuit.generate_gate_random(max_cycle, max_single_num_per_cycle, single_multi_qubit_gate)
         self.ideal_circuit_sim_result = self.ideal_circuit.apply_circuit()
     
-    @RandomCompiling.RandomCompile.applyRC(True)
+    @RandomCompiling.RandomCompile.applyRC(True, 'SINGLE_UNIT')
     def deepcopy_ideal_circuit(self, circuit_name):
         if self.ideal_circuit is None:
             raise ValueError("Ideal circuit is not generated yet")
@@ -353,13 +401,28 @@ class QuantumCircuitRC:
         for i in range(trials_num):
             qc = self.deepcopy_ideal_circuit(f"{self.name}_trial{i}")
             self.trials_qc_gate_list.append(qc)
-    
+        
     # The function to apply the quantum circuit to all trials
     def apply_circuit_all_trials(self, simulator='mqvector'):
         if len(self.trials_qc_gate_list) == 0:
             raise ValueError("No trials quantum circuit generated yet")
         for i in range(len(self.trials_qc_gate_list)):
             self.trials_circuit_sim_result.append(self.trials_qc_gate_list[i].apply_circuit(simulator))
+    
+    # The function to apply the combination for the RC quantum circuits
+    def generate_circuit_combination_all_trials(self):
+        if len(self.trials_qc_gate_list) == 0:
+            raise ValueError("No trials quantum circuit generated yet")
+        for i in range(len(self.trials_qc_gate_list)):
+            qc_comb = QuantumCircuit(self.qubits_num, f"{self.name}_trial{i}_combined")
+            self.trials_combined_circuits.append(RandomCompiling.RandomCompile.applyRC_combine(qc_comb, self.trials_qc_gate_list[i]))
+    
+    # The function to apply the quantum circuit to all combined trials
+    def apply_circuit_combination_all_trials(self, simulator='mqvector'):
+        if len(self.trials_combined_circuits) == 0:
+            raise ValueError("No combined quantum circuit generated yet")
+        for i in range(len(self.trials_combined_circuits)):
+            self.trials_combined_circuit_sim_result.append(self.trials_combined_circuits[i].apply_circuit(simulator))   
             
     ####################### The following functions are for visualization ############################
     
@@ -389,7 +452,19 @@ class QuantumCircuitRC:
             print(f"Trial {i}: \n {self.trials_circuit_sim_result[i].get_qs(True)}")
             print("\n")
     
- 
+    # The function to visualize the combined circuits of all trials
+    def visualize_combined_circuit_all_trials(self):
+        for i in range(len(self.trials_combined_circuits)):
+            self.trials_combined_circuits[i].test_draw_circuit_from_list()
+            print("\n")
+    
+    # The function to visualize the simulator results for all combined trials
+    def visualize_all_RC_combined_sim_results(self):
+        if len(self.trials_combined_circuit_sim_result) == 0:
+            raise ValueError("No simulator results for combined trials generated yet")
+        for i in range(len(self.trials_combined_circuit_sim_result)):
+            print(f"Trial {i}: \n {self.trials_combined_circuit_sim_result[i].get_qs(True)}")
+            print("\n")
 
 # qubit_idx_list = [i for i in range(5)]
 # print(select_target_control_pair_rand(qubit_idx_list))    
@@ -461,24 +536,32 @@ class QuantumCircuitRC:
 #     #         assert ideal_sv[j].imag == trial_sv[i][j].imag
 
 
-# test_RC_gate_functionality_hypothesis(2, 1, 1)
+# test combined circuit
+# qc_RC = QuantumCircuitRC(2, "test")
+# qc_RC.generate_ideal_circuit_random(1, 1, single_multi_qubit_gate=False)
+# qc_RC.generate_trials_circuit(1)
+# qc_RC.generate_circuit_combination_all_trials()
+# qc_RC.apply_circuit_combination_all_trials()
+# qc_RC.apply_circuit_all_trials()
+# qc_RC.visualize_ideal_circuit()
+# qc_RC.visualize_all_RC_circuit_trials()
+# qc_RC.visualize_combined_circuit_all_trials()
+# sv = qc_RC.ideal_circuit_sim_result.get_pure_state_vector()
+# print(sv)
+# print(qc_RC.trials_circuit_sim_result[0].get_pure_state_vector())
+# print(qc_RC.trials_combined_circuit_sim_result[0].get_pure_state_vector())
+# # qc_RC.visualize_all_RC_sim_results()
+# print(qc_RC.trials_combined_circuits[0].gate_list)
+# print(qc_RC.trials_combined_circuits[0].circuit)
 
 
 
 
-    # "XI": ["XX", 0, 0], ok
-    # "IX": ["IX", 0, 0], ok
-    # "XX": ["XI", 0, 0], ok 
-    # "YX": ["YI", 0, 0], ok
-    # "ZX": ["ZX", 0, 0], ok
-    # "YI": ["YX", 0, 0], ok
-    # "IY": ["ZY", 0, 0], ok
-    # "XY": ["YZ", 0, 0], ok
-    # "YY": ["XZ", 0, 1], ok
-    # "ZY": ["IY", 0, 0], ok
-    # "ZI": ["ZI", 0, 0], ok
-    # "IZ": ["ZZ", 0, 0], ok
-    # "XZ": ["YY", 0, 1], ok
-    # "YZ": ["XY", 0, 0], ok
-    # "ZZ": ["IZ", 0, 0], ok
-    # "II": ["II", 0, 0]  ok
+# test single unit 
+# qc = QuantumCircuit.generate_single_unit()
+# qc.test_draw_circuit_from_list()
+qc_RC = QuantumCircuitRC(2, "test_single_unit", True)
+qc_RC.generate_ideal_circuit_random()
+qc_RC.generate_trials_circuit( 3)
+qc_RC.visualize_ideal_circuit()
+qc_RC.visualize_all_RC_circuit_trials()

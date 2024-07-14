@@ -2,7 +2,7 @@ import numpy as np
 from mindquantum.simulator import Simulator
 from mindquantum.core.circuit import Circuit
 from mindquantum.core.gates import Measure
-from mindquantum.core.gates import H, X, Y, Z, CNOT, SWAP, RX, RY, RZ, U3
+from mindquantum.core.gates import H, X, Y, Z, CNOT, SWAP, RX, RY, RZ, U3, I
 from mindquantum.core.circuit import GateSelector, SequentialAdder, MixerAdder, NoiseChannelAdder
 import random
 import math
@@ -28,11 +28,17 @@ RCGateSet = {
     'I'
 }
 
+# RC_matrix_table = {
+#     "X": np.array([[0, 1], [1, 0]]),
+#     "Y": np.array([[0, -1j], [1j, 0]]),
+#     "Z": np.array([[1, 0], [0, -1]]),
+#     "I": np.array([[1, 0], [0, 1]])
+# }
 RC_matrix_table = {
-    "X": np.array([[0, 1], [1, 0]]),
-    "Y": np.array([[0, -1j], [1j, 0]]),
-    "Z": np.array([[1, 0], [0, -1]]),
-    "I": np.array([[1, 0], [0, 1]])
+    "X": X.matrix(),
+    "Y": Y.matrix(),
+    "Z": Z.matrix(),
+    "I": I.matrix()
 }
 
 # Define the mapping table for RC gate and its complementary
@@ -74,14 +80,58 @@ class RandomCompile:
         phi = cmath.phase(matrix[1][0]) - cmath.phase(matrix[0][0])
         lambda_ = cmath.phase(matrix[1][1]) - cmath.phase(matrix[1][0])
         return [theta, phi, lambda_]
+        # # Extract the elements of U
+        # U = matrix
+        # U00, U01 = U[0, 0], U[0, 1]
+        # U10, U11 = U[1, 0], U[1, 1]
+        # # Calculate theta
+        # theta = 2 * np.arccos(np.abs(U00))
+        # # Calculate phi
+        # if np.abs(np.sin(theta / 2)) > 1e-10:  # To avoid division by zero
+        #     phi = np.angle(U10) - np.angle(U00)
+        # else:
+        #     phi = 0
+        # # Calculate lambda
+        # if np.abs(np.sin(theta / 2)) > 1e-10:
+        #     lambda_ = np.angle(U01) - np.angle(U10)
+        # else:
+        #     lambda_ = np.angle(U11) - np.angle(U00) - phi
+        # return [theta, phi, lambda_]
+    
+    # The function to apply the RC gate for a single unit
+    @staticmethod
+    def applyRC_single_unit(qc):
+        control_rng = random.randint(0, len(RCGateTable) - 1)
+        target_rng = random.randint(0, len(RCGateTable) - 1)
+        control_RC = RCGateTable[control_rng]
+        target_RC = RCGateTable[target_rng]
+        RC_str = control_RC + target_RC
+        RC_comp = RCGateComplementaryMapping[RC_str]
+        control_RC_comp = RC_comp[0][0]
+        target_RC_comp = RC_comp[0][1]
+        control_RC_comp_sign = RC_comp[1]
+        target_RC_comp_sign = RC_comp[2]
+        # find target index and control index
+        target_idx = 0 if qc.gate_list[0][0][1][0] == 0 else 1
+        control_idx = 1 if target_idx == 0 else 0
+        qc.gate_list[target_idx].insert(0, [target_RC, 0])  # Insert RC gate
+        qc.gate_list[target_idx].insert(2, [target_RC_comp, target_RC_comp_sign])
+        qc.gate_list[control_idx].insert(0, [control_RC, 0])
+        qc.gate_list[control_idx].insert(2, [control_RC_comp, control_RC_comp_sign])
+        # update the sec_list
+        qc.sec_list[0][1] += 2
+        return qc
     
     # The RC gate only applies for multi-qubit gates
     @staticmethod
-    def applyRC(RC_apply=True):
+    def applyRC(RC_apply=True, Singleunit='SINGLE_UNIT'):
         def decorator(func):
-            def wrapper(*args, **kwargs):
-                qc = func(*args, **kwargs)
+            def wrapper(self, *args, **kwargs):
+                SINGLE_UNIT = getattr(self, Singleunit, None)
+                qc = func(self, *args, **kwargs)
                 if RC_apply:
+                    if SINGLE_UNIT:
+                        return RandomCompile.applyRC_single_unit(qc)
                     # Apply the RC gate logic
                     n_qubit = len(qc.gate_list)
                     # total_cycle_added = 0
@@ -182,6 +232,7 @@ class RandomCompile:
                     cycle += 2
                 # check if the RC gate is applied for barrier
                 elif (qc.gate_list[qubit_idx][cycle][0] in RCGateSet) and (qc.gate_list[qubit_idx][cycle+1][0] == "BARRIER"):
+                    qc_comb.gate_list[qubit_idx].append(["BARRIER"])
                     cycle += 3
                 # check if the current gate is a multiple qubit gate or normal U3 gate
                 else:
@@ -201,6 +252,11 @@ class RandomCompile:
         cycle_sub = 0
         for i in range(len(qc.sec_list)):
             sec = []
+            if i == len(qc.sec_list) - 1:
+                sec.append(qc.sec_list[i][0]-cycle_sub)
+                sec.append(qc.sec_list[i][1]-cycle_sub)
+                sec_list_comb.append(sec)
+                continue
             sec.append(qc.sec_list[i][0]-cycle_sub)
             cycle_sub += 2
             sec.append(qc.sec_list[i][1]-cycle_sub)
@@ -273,3 +329,28 @@ class RandomCompile:
 # matrix = U3(0, 0, 1).matrix()
 # print(matrix)
 # print(RandomCompile.get_U3_gate(matrix))
+
+# matrix = U3(3.9, 0.3, 1.9).matrix()
+# # M_result = matrix @ RC_matrix_table['Z']
+# M_result = RC_matrix_table['X'] @ matrix
+# print(RandomCompile.get_U3_gate(M_result)) 
+
+# print(np.kron(U3(4.2, 3.5, 3.7).matrix(), U3(3.1, 3.4, 6.1).matrix()) @ np.kron(Z.matrix(), Y.matrix()))
+# U_matrix_1 = RandomCompile.get_U3_matrix(2.1, -2.8, 0.5)
+# U_matrix_0 = RandomCompile.get_U3_matrix(0.1, -0.3, -3.3)
+# print(np.kron(U_matrix_1, U_matrix_0))
+
+U_1_matrix = U3(4.2, 3.5, 3.7).matrix()
+U_0_matrix = U3(3.1, 3.4, 6.1).matrix()
+RC_1_matrix = Z.matrix()
+RC_0_matrix = Y.matrix()
+param_1 = RandomCompile.get_U3_gate(RC_1_matrix @ U_1_matrix)
+# print(RC_1_matrix @ U_1_matrix)
+# print(U3(param_1[0], param_1[1], param_1[2]).matrix())
+# param_0 = RandomCompile.get_U3_gate(RC_0_matrix @ U_0_matrix)
+# print(RC_0_matrix @ U_0_matrix)
+# print(U3(param_0[0], param_0[1], param_0[2]).matrix())
+
+param = RandomCompile.get_U3_gate(U_1_matrix)
+# print(U_1_matrix)
+# print(RandomCompile.get_U3_matrix(param[0], param[1], param[2]))

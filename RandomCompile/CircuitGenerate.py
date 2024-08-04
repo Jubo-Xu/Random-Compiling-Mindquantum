@@ -159,8 +159,31 @@ class QuantumCircuit:
         qc.sec_list.append([0, 0])
         return qc
     
+    # The function to generate the noise list for single unit
+    def generate_noise_list_single_unit(self):
+        for i in range(self.qubits_num):
+            self.NOISE_LIST[i].extend([False, True, False])
+    
     def AddNoise(func):
         def wrapper(self, *args, **kwargs):
+            if self.NOISE:
+                cycle = args[0]
+                # if cycle == 0:
+                #     self.circuit += RX(np.pi/2).on(1)
+                # loop through each qubit
+                for qubit_idx in range(self.qubits_num):
+                    # check whether a noise channel should be added after each gate
+                    if self.NOISE_LIST[qubit_idx][cycle]:
+                        if self.gate_list[qubit_idx][cycle][0] == "CNOT":
+                            if self.gate_list[qubit_idx][cycle][1][0] == 1:
+                                self.circuit += RX(0.5).on(qubit_idx)
+                        # add the depolarizing noise
+                        # self.circuit += DepolarizingChannel(0.2).on(qubit_idx)
+                        # # add the amplitude damping noise
+                        # self.circuit += AmplitudeDampingChannel(0.2).on(qubit_idx)
+                        # # add the phase damping noise
+                        # self.circuit += PhaseDampingChannel(0.2).on(qubit_idx)
+                        continue
             # Call the actual function
             func(self, *args, **kwargs)
             # Add noise to the circuit if needed
@@ -169,13 +192,15 @@ class QuantumCircuit:
                 # loop through each qubit
                 for qubit_idx in range(self.qubits_num):
                     # check whether a noise channel should be added after each gate
+                    # self.circuit += RX(0.5).on(1)
                     if self.NOISE_LIST[qubit_idx][cycle]:
-                        # add the depolarizing noise
-                        self.circuit += DepolarizingChannel(0.1).on(qubit_idx)
-                        # add the amplitude damping noise
-                        self.circuit += AmplitudeDampingChannel(0.1).on(qubit_idx)
-                        # add the phase damping noise
-                        self.circuit += PhaseDampingChannel(0.1).on(qubit_idx)
+                        # # add the depolarizing noise
+                        # self.circuit += DepolarizingChannel(0.1).on(qubit_idx)
+                        # # add the amplitude damping noise
+                        # self.circuit += AmplitudeDampingChannel(0.1).on(qubit_idx)
+                        # # add the phase damping noise
+                        # self.circuit += PhaseDampingChannel(0.1).on(qubit_idx)
+                        continue
             return 
         return wrapper
     
@@ -218,11 +243,13 @@ class QuantumCircuit:
             else:
                 continue
     
-    
     # The function to apply the quantum circuit to the simulator
-    def apply_circuit(self, simulator='mqvector'):
+    def mindspore_circuit_gen(self):
         for cycle in range(len(self.gate_list[0])):
             self.apply_gate_each_cycle(cycle)
+    
+    def apply_circuit(self, simulator='mqvector'):
+        self.mindspore_circuit_gen()
         sim = Simulator(simulator, self.qubits_num)
         sim.apply_circuit(self.circuit)
         return sim
@@ -338,6 +365,13 @@ def select_target_control_pair_rand(qubit_num_list):
         valid_total += 1
     return target_control_pair_list
 
+# The function to transfer a bitstring into corresponding decimal index
+def bitstring_to_decimal_idx(bitstring):
+    idx = 0
+    for i in range(len(bitstring)):
+        idx += int(bitstring[i])*(2**(len(bitstring)-i-1))
+    return idx
+
 
 
 ############################### quantum circuit under RC ##################################
@@ -348,10 +382,16 @@ class QuantumCircuitRC:
         self.qubits_num = qubits_num
         self.ideal_circuit = None
         self.ideal_circuit_sim_result = None # the simulator result for the ideal quantum circuit
+        self.ideal_circuit_noise = None # the noise version of ideal circuit
+        self.ideal_circuit_noise_count_list = [0 for i in range(2**qubits_num)] # the list of count of each basis for the noise version of ideal circuit
         self.trials_qc_gate_list = [] # the list of gate_list based quantum circuits for trials
         self.trials_circuit_sim_result = [] # the list of simulator results for quantum circuits of all trials
+        self.trials_count_list = [0 for i in range(2**qubits_num)] # the list of count of each basis for all trials
         self.trials_combined_circuits = [] # the list of combined quantum circuits for all trials
         self.trials_combined_circuit_sim_result = [] # the list of simulator results for combined quantum circuits for all trials
+        self.ideal_circuit_noise_prob_list = [0 for i in range(2**qubits_num)] # the list of probability of each basis for the noise version of ideal circuit
+        self.trials_prob_list = [0 for i in range(2**qubits_num)] # the list of probability of each basis for all trials
+        self.ideal_prob_list = [0 for i in range(2**qubits_num)] # the list of probability of each basis for the ideal circuit
     
     @staticmethod
     def from_json(json_file):
@@ -368,12 +408,16 @@ class QuantumCircuitRC:
         else:
             self.ideal_circuit.generate_gate_random(max_cycle, max_single_num_per_cycle, single_multi_qubit_gate)
         self.ideal_circuit_sim_result = self.ideal_circuit.apply_circuit()
+        state_vector = self.ideal_circuit_sim_result.get_pure_state_vector()
+        # update the probability list for the ideal circuit
+        for i in range(len(state_vector)):
+            self.ideal_prob_list[i] = (state_vector[i].real)**2+(state_vector[i].imag)**2
     
     @RandomCompiling.RandomCompile.applyRC(True, 'SINGLE_UNIT')
-    def deepcopy_ideal_circuit(self, circuit_name):
+    def deepcopy_ideal_circuit(self, circuit_name, ideal_copy=False, noise=False):
         if self.ideal_circuit is None:
             raise ValueError("Ideal circuit is not generated yet")
-        qc = QuantumCircuit(self.qubits_num, circuit_name)
+        qc = QuantumCircuit(self.qubits_num, circuit_name, noise)
         # deep copy the gate_list
         for qubit_idx in range(len(self.ideal_circuit.gate_list)):
             for cycle in range(len(self.ideal_circuit.gate_list[qubit_idx])):
@@ -397,11 +441,23 @@ class QuantumCircuitRC:
         return qc
     
     # The function to generate the trials quantum circuits based on the ideal quantum circuit
-    def generate_trials_circuit(self, trials_num):
+    def generate_trials_circuit(self, trials_num, noise=True):
         for i in range(trials_num):
-            qc = self.deepcopy_ideal_circuit(f"{self.name}_trial{i}")
+            qc = self.deepcopy_ideal_circuit(f"{self.name}_trial{i}", noise=noise)
             self.trials_qc_gate_list.append(qc)
-        
+    
+    # The function to generate the noise version of ideal_circuit
+    def generate_ideal_circuit_noise(self):
+        qc = self.deepcopy_ideal_circuit(f"{self.name}_noise", ideal_copy=True, noise=True)
+        # generate the noise list, here just set all to True
+        for i in range(self.qubits_num):
+            for j in range(len(qc.gate_list[i])):
+                qc.NOISE_LIST[i].append(True)
+        # apply the circuit
+        qc.mindspore_circuit_gen()
+        self.ideal_circuit_noise = qc
+        return
+    
     # The function to apply the quantum circuit to all trials
     def apply_circuit_all_trials(self, simulator='mqvector'):
         if len(self.trials_qc_gate_list) == 0:
@@ -423,6 +479,63 @@ class QuantumCircuitRC:
             raise ValueError("No combined quantum circuit generated yet")
         for i in range(len(self.trials_combined_circuits)):
             self.trials_combined_circuit_sim_result.append(self.trials_combined_circuits[i].apply_circuit(simulator))   
+            
+    # The function to apply the circuit to single units
+    def apply_circuit_single_unit(self):
+        if not self.SINGLE_UNIT:
+            raise ValueError("The circuit is not a single unit")
+        for i in range(len(self.trials_qc_gate_list)):
+            # generate the noise lists for all trials
+            self.trials_qc_gate_list[i].generate_noise_list_single_unit()
+            # apply the circuit to all trials
+            self.trials_qc_gate_list[i].mindspore_circuit_gen()
+        return
+    
+    # The function to get the count list and probability list for all trials
+    def get_count_prob_list_all_trials(self, sim):
+        for trial in range(len(self.trials_qc_gate_list)):
+            # add the measurement gate for all qubits
+            for qubit_idx in range(self.qubits_num):
+                self.trials_qc_gate_list[trial].circuit += Measure(f"q{qubit_idx}").on(qubit_idx)
+            # sampling the circuit
+            result_dict = sim.sampling(self.trials_qc_gate_list[trial].circuit, shots=1).bit_string_data
+            # update the count list
+            for bitstring in result_dict:
+                idx = bitstring_to_decimal_idx(bitstring)
+                self.trials_count_list[idx] += result_dict[bitstring]
+        # update the probability list
+        num_trials = len(self.trials_qc_gate_list)
+        for i in range(len(self.trials_count_list)):
+            self.trials_prob_list[i] = self.trials_count_list[i]/num_trials
+        return
+    
+    # The function to generate a test mainly for single unit
+    @staticmethod
+    def test_single_unit(num_trials=1000, simulator="mqvector"):
+        qc_RC = QuantumCircuitRC(2, "test_single_unit", True)
+        qc_RC.generate_ideal_circuit_random()
+        qc_RC.generate_trials_circuit(num_trials)
+        qc_RC.generate_ideal_circuit_noise()
+        qc_RC.apply_circuit_single_unit()
+        # sampling the noise version of ideal circuit to get the count list
+        # add the measurement gate for all qubits
+        for qubit_idx in range(qc_RC.qubits_num):
+            qc_RC.ideal_circuit_noise.circuit += Measure(f"q{qubit_idx}").on(qubit_idx)
+        # sampling the circuit
+        sim = Simulator(simulator, qc_RC.qubits_num)
+        result_dict_ideal = sim.sampling(qc_RC.ideal_circuit_noise.circuit, shots=num_trials).bit_string_data
+        for bitstring in result_dict_ideal:
+            idx = bitstring_to_decimal_idx(bitstring)
+            qc_RC.ideal_circuit_noise_count_list[idx] = result_dict_ideal[bitstring]
+        # update the probability list for the noise version of ideal circuit
+        for i in range(len(qc_RC.ideal_circuit_noise_count_list)):
+            qc_RC.ideal_circuit_noise_prob_list[i] = qc_RC.ideal_circuit_noise_count_list[i]/num_trials
+        
+        # sampling all trials
+        qc_RC.get_count_prob_list_all_trials(sim)
+        return qc_RC
+    
+        
             
     ####################### The following functions are for visualization ############################
     
@@ -560,8 +673,59 @@ class QuantumCircuitRC:
 # test single unit 
 # qc = QuantumCircuit.generate_single_unit()
 # qc.test_draw_circuit_from_list()
-qc_RC = QuantumCircuitRC(2, "test_single_unit", True)
-qc_RC.generate_ideal_circuit_random()
-qc_RC.generate_trials_circuit( 3)
-qc_RC.visualize_ideal_circuit()
-qc_RC.visualize_all_RC_circuit_trials()
+
+# qc_RC = QuantumCircuitRC(2, "test_single_unit", True)
+# qc_RC.generate_ideal_circuit_random()
+# qc_RC.generate_trials_circuit(1)
+# qc_RC.visualize_ideal_circuit()
+# qc_RC.visualize_all_RC_circuit_trials()
+# qc_RC.generate_ideal_circuit_noise()
+# qc_RC.apply_circuit_single_unit()
+# print(qc_RC.ideal_circuit_noise.circuit)
+# print(qc_RC.trials_qc_gate_list[0].circuit)
+
+# qc_RC.ideal_circuit_noise.circuit += Measure("q0").on(0)
+# qc_RC.ideal_circuit_noise.circuit += Measure("q1").on(1)
+# sim = Simulator('mqvector', 2)
+# result = sim.sampling(qc_RC.ideal_circuit_noise.circuit, shots=10)
+# print(result)
+# # print(result.samples)
+# print(result.bit_string_data)
+# for key in result.bit_string_data:
+#     print(f"{key}: {result.bit_string_data[key]}")
+# print(qc_RC.ideal_circuit_sim_result.get_pure_state_vector())
+
+
+
+# qc_RC = QuantumCircuitRC.test_single_unit(num_trials=1000)
+# print(qc_RC.ideal_circuit_noise.circuit)
+# print(qc_RC.trials_qc_gate_list[0].circuit)
+# no_RC_fidelity, RC_fidelity = RandomCompiling.RandomCompile.Fidelity_Evaluation(qc_RC.ideal_prob_list, qc_RC.ideal_circuit_noise_prob_list, qc_RC.trials_prob_list)
+# print(no_RC_fidelity)
+# print(RC_fidelity)
+
+# # print("ideal:")
+# # print(qc_RC.ideal_prob_list)
+# print("no RC:")
+# print(qc_RC.ideal_circuit_noise_prob_list)
+# print("RC:")
+# print(qc_RC.trials_prob_list)
+
+
+
+
+# print(qc_RC.ideal_prob_list)
+# print(qc_RC.ideal_circuit_noise_prob_list)
+# print(qc_RC.trials_prob_list)
+# print(qc_RC.ideal_circuit_noise.circuit)
+# for i in range(len(qc_RC.trials_qc_gate_list)):
+#     print(qc_RC.trials_qc_gate_list[i].circuit)
+
+# qc_test = Circuit()
+# qc_test += RX(np.pi/2).on(1)
+# qc_test += X.on(0, 1)
+
+# sim = Simulator('mqvector', 2)
+# sim.apply_circuit(qc_test)
+# print(qc_test)
+# print(sim.get_qs(True))

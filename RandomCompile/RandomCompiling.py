@@ -129,7 +129,9 @@ class RandomCompile:
             def wrapper(self, *args, **kwargs):
                 SINGLE_UNIT = getattr(self, Singleunit, None)
                 qc = func(self, *args, **kwargs)
-                if RC_apply:
+                # ideal_copy = args[1]
+                ideal_copy = kwargs.get('ideal_copy', False)
+                if RC_apply and (not ideal_copy):
                     if SINGLE_UNIT:
                         return RandomCompile.applyRC_single_unit(qc)
                     # Apply the RC gate logic
@@ -264,6 +266,23 @@ class RandomCompile:
         qc_comb.sec_list = sec_list_comb
         return qc_comb
     
+    ############################## The metric to evaluate the fidelity of the compiled circuit ##############################
+    # Total Variation Distance
+    @staticmethod
+    def Total_Variation_Distance(prob_ideal, prob_noise):
+        abs_sum = 0
+        for i in range(len(prob_ideal)):
+            abs_sum += abs(prob_ideal[i] - prob_noise[i])
+        return 0.5*abs_sum
+    
+    @staticmethod
+    def Fidelity_Evaluation(prob_ideal, prob_no_RC, prob_RC, metric="TVD"):
+        no_RC_fidelity = 0
+        RC_fidelity = 0
+        if metric == "TVD":
+            no_RC_fidelity = RandomCompile.Total_Variation_Distance(prob_ideal, prob_no_RC)
+            RC_fidelity = RandomCompile.Total_Variation_Distance(prob_ideal, prob_RC)
+        return no_RC_fidelity, RC_fidelity
     
     # @staticmethod
     # def applyRC(func, RC_apply=True):
